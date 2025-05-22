@@ -27,6 +27,27 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "fuzz_encode_varint"
+path = "fuzz_targets/fuzz_encode_varint.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_decode_varint"
+path = "fuzz_targets/fuzz_decode_varint.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_varint_roundtrip"
+path = "fuzz_targets/fuzz_varint_roundtrip.rs"
+test = false
+doc = false
+bench = false
+
 [profile.dev]
 opt-level = 0
 debug = true

@@ -22,6 +22,10 @@ extern "C" {
     pub fn free_compressed_data(data: CompressedData);
     pub fn decompress_data(input: *const c_char, input_len: c_ulong) -> DecompressedData;
     pub fn free_decompressed_data(data: DecompressedData);
+    
+    // Variable-byte encoding functions
+    pub fn encode_varint(value: c_ulong, buffer: *mut c_char) -> i32;
+    pub fn decode_varint(buffer: *const c_char, max_bytes: i32, value: *mut c_ulong) -> i32;
 }
 
 /// Compresses a string using the C library's `compress_string` function.
@@ -128,6 +132,70 @@ pub fn decompress_rust_data(compressed_data: &[u8]) -> Result<String, &'static s
         Ok(s) => Ok(s),
         Err(_) => Err("Decompressed data is not valid UTF-8"),
     }
+}
+
+/// Encodes a value using variable-byte encoding.
+///
+/// # Arguments
+/// * `value`: The value to encode.
+///
+/// # Returns
+/// * `Ok(Vec<u8>)` containing the encoded bytes if successful.
+/// * `Err(&str)` with an error message if encoding fails.
+///
+/// # Safety
+/// This function wraps unsafe FFI calls but handles buffer allocation safely.
+pub fn encode_varint_rust(value: u64) -> Result<Vec<u8>, &'static str> {
+    // Allocate buffer for varint (maximum 10 bytes for 64-bit value)
+    let mut buffer = vec![0u8; 10];
+    
+    let bytes_written = unsafe {
+        encode_varint(value as c_ulong, buffer.as_mut_ptr() as *mut c_char)
+    };
+    
+    if bytes_written < 0 || bytes_written > 10 {
+        return Err("Invalid bytes written by encode_varint");
+    }
+    
+    buffer.truncate(bytes_written as usize);
+    Ok(buffer)
+}
+
+/// Decodes a variable-byte encoded value.
+///
+/// # Arguments
+/// * `data`: The encoded data as a byte slice.
+///
+/// # Returns
+/// * `Ok((value, bytes_read))` containing the decoded value and number of bytes consumed if successful.
+/// * `Err(&str)` with an error message if decoding fails.
+///
+/// # Safety
+/// This function wraps unsafe FFI calls but handles pointer safety.
+pub fn decode_varint_rust(data: &[u8]) -> Result<(u64, usize), &'static str> {
+    if data.is_empty() {
+        return Err("Empty input data");
+    }
+    
+    let mut value: c_ulong = 0;
+    
+    let bytes_read = unsafe {
+        decode_varint(
+            data.as_ptr() as *const c_char,
+            data.len() as i32,
+            &mut value as *mut c_ulong,
+        )
+    };
+    
+    if bytes_read < 0 {
+        return Err("Failed to decode varint");
+    }
+    
+    if bytes_read > data.len() as i32 {
+        return Err("Invalid bytes read count");
+    }
+    
+    Ok((value as u64, bytes_read as usize))
 }
 
 #[cfg(test)]
@@ -325,6 +393,85 @@ mod tests {
         
         let result = decompress_rust_data(&invalid_compressed_data);
         assert!(result.is_err(), "Decompression of invalid data should fail");
+    }
+
+    #[test]
+    fn test_varint_encoding_basic() {
+        let test_cases = vec![
+            (0, vec![0x00]),
+            (1, vec![0x01]),
+            (127, vec![0x7F]),
+            (128, vec![0x80, 0x01]),
+            (255, vec![0xFF, 0x01]),
+            (256, vec![0x80, 0x02]),
+            (16383, vec![0xFF, 0x7F]),
+            (16384, vec![0x80, 0x80, 0x01]),
+        ];
+
+        for (value, expected) in test_cases {
+            let encoded = encode_varint_rust(value).expect("Encoding should work");
+            assert_eq!(encoded, expected, "Encoding of {} should produce {:?}, got {:?}", value, expected, encoded);
+        }
+    }
+
+    #[test]
+    fn test_varint_decoding_basic() {
+        let test_cases = vec![
+            (vec![0x00], 0, 1),
+            (vec![0x01], 1, 1),
+            (vec![0x7F], 127, 1),
+            (vec![0x80, 0x01], 128, 2),
+            (vec![0xFF, 0x01], 255, 2),
+            (vec![0x80, 0x02], 256, 2),
+            (vec![0xFF, 0x7F], 16383, 2),
+            (vec![0x80, 0x80, 0x01], 16384, 3),
+        ];
+
+        for (data, expected_value, expected_bytes_read) in test_cases {
+            let (value, bytes_read) = decode_varint_rust(&data).expect("Decoding should work");
+            assert_eq!(value, expected_value, "Decoding {:?} should produce value {}, got {}", data, expected_value, value);
+            assert_eq!(bytes_read, expected_bytes_read, "Decoding {:?} should read {} bytes, got {}", data, expected_bytes_read, bytes_read);
+        }
+    }
+
+    #[test]
+    fn test_varint_round_trip() {
+        let test_values = vec![
+            0, 1, 127, 128, 255, 256, 16383, 16384, 65535, 65536,
+            1 << 20, 1 << 30, u64::MAX,
+        ];
+
+        for value in test_values {
+            let encoded = encode_varint_rust(value).expect("Encoding should work");
+            let (decoded_value, bytes_read) = decode_varint_rust(&encoded).expect("Decoding should work");
+            
+            assert_eq!(value, decoded_value, "Round trip should preserve value {}", value);
+            assert_eq!(bytes_read, encoded.len(), "Should read all encoded bytes");
+        }
+    }
+
+    #[test]
+    fn test_varint_decode_empty_input() {
+        let result = decode_varint_rust(&[]);
+        assert!(result.is_err(), "Decoding empty input should fail");
+    }
+
+    #[test]
+    fn test_varint_decode_incomplete() {
+        // Incomplete varint (has continuation bit but no next byte)
+        let incomplete_data = vec![0x80];
+        let result = decode_varint_rust(&incomplete_data);
+        assert!(result.is_err(), "Decoding incomplete varint should fail");
+    }
+
+    #[test]
+    fn test_varint_decode_with_extra_data() {
+        // Varint followed by extra data
+        let data = vec![0x01, 0x42, 0x43]; // varint(1) + extra bytes
+        let (value, bytes_read) = decode_varint_rust(&data).expect("Should decode the varint part");
+        
+        assert_eq!(value, 1, "Should decode the varint correctly");
+        assert_eq!(bytes_read, 1, "Should only read the varint bytes");
     }
 
     // Property-based tests

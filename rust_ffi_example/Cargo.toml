@@ -24,6 +24,10 @@ pkg-config = "0.3"
 name = "compression_bench"
 harness = false
 
+[[bench]]
+name = "varint_bench"
+harness = false
+
 [package.metadata.cargo-fuzz]
 targets = ["fuzz_compression"]
 

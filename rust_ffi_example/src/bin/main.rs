@@ -44,7 +44,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             println!("Original data length: {} bytes", input_data.len());
-            println!("Original data: \"{}\"", input_data.trim());
 
             // Compress the data
             match compress_rust_string(&input_data) {
