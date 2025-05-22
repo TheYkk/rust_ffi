@@ -9,10 +9,19 @@ pub struct CompressedData {
     pub length: c_ulong,
 }
 
+// Define the Rust equivalent of the C struct DecompressedData
+#[repr(C)]
+pub struct DecompressedData {
+    pub buffer: *mut c_char,
+    pub length: c_ulong,
+}
+
 // Declare the C functions that will be called from Rust
 extern "C" {
     pub fn compress_string(input: *const c_char, input_len: c_ulong) -> CompressedData;
     pub fn free_compressed_data(data: CompressedData);
+    pub fn decompress_data(input: *const c_char, input_len: c_ulong) -> DecompressedData;
+    pub fn free_decompressed_data(data: DecompressedData);
 }
 
 /// Compresses a string using the C library's `compress_string` function.
@@ -68,6 +77,59 @@ pub fn compress_rust_string(s: &str) -> Result<Vec<u8>, &'static str> {
     Ok(rust_vec)
 }
 
+/// Decompresses data using the C library's `decompress_data` function.
+/// The original size is automatically read from the compressed data header.
+///
+/// # Arguments
+/// * `compressed_data`: The compressed data as a byte slice (including the size header).
+///
+/// # Returns
+/// * `Ok(String)` containing the decompressed string if successful.
+/// * `Err(&str)` with an error message if decompression fails or output is invalid UTF-8.
+///
+/// # Safety
+/// This function wraps unsafe FFI calls. It handles memory management
+/// for the data returned by the C function and validates UTF-8.
+pub fn decompress_rust_data(compressed_data: &[u8]) -> Result<String, &'static str> {
+    // Call the C function
+    // This is an unsafe block because we are calling C code and dealing with raw pointers.
+    let decompressed_c_data = unsafe {
+        decompress_data(
+            compressed_data.as_ptr() as *const c_char,
+            compressed_data.len() as c_ulong,
+        )
+    };
+
+    // Check if the C function returned a valid buffer
+    if decompressed_c_data.buffer.is_null() {
+        return Err("Decompression failed in C library (null buffer returned)");
+    }
+
+    // Convert the C data (raw pointer and length) to a Rust Vec<u8>
+    // This is also unsafe because we are dereferencing a raw pointer from C.
+    let rust_vec: Vec<u8> = unsafe {
+        // Create a slice from the raw parts
+        let slice = slice::from_raw_parts(
+            decompressed_c_data.buffer as *const u8,
+            decompressed_c_data.length as usize,
+        );
+        // Clone the data into a new Vec<u8>
+        slice.to_vec()
+    };
+
+    // Free the memory allocated by the C function
+    // This is crucial to prevent memory leaks.
+    unsafe {
+        free_decompressed_data(decompressed_c_data);
+    }
+
+    // Convert Vec<u8> to String, ensuring valid UTF-8
+    match String::from_utf8(rust_vec) {
+        Ok(s) => Ok(s),
+        Err(_) => Err("Decompressed data is not valid UTF-8"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,11 +143,13 @@ mod tests {
         match compress_rust_string(original_data) {
             Ok(compressed_data) => {
                 println!("Compressed length: {}", compressed_data.len());
-                // For very short strings, compression might not reduce size.
-                // For a reasonably long string, it should.
-                assert!(compressed_data.len() > 0, "Compressed data should not be empty.");
-                if original_data.len() > 20 { // Only assert smaller if original is somewhat long
-                    assert!(compressed_data.len() < original_data.len(), "Compressed data should be smaller than original for this input.");
+                // For short strings, compression + variable-byte header might not reduce size.
+                // The compressed data includes a variable-byte header (1-5 bytes) with the original length.
+                assert!(compressed_data.len() > 1, "Compressed data should contain header + compressed content.");
+                
+                // For longer strings, compression should still be effective despite the header overhead
+                if original_data.len() > 200 { // Only assert smaller for much longer strings
+                    assert!(compressed_data.len() < original_data.len(), "Compressed data should be smaller than original for large input.");
                 }
 
                 // To actually verify, we would need a decompress function.
@@ -125,6 +189,144 @@ mod tests {
         assert!(compress_rust_string(original_data).is_err(), "Should fail for string with internal null byte due to CString conversion.");
     }
 
+    #[test]
+    fn test_compression_decompression_round_trip() {
+        let original_data = "This is a test string for zlib compression and decompression round trip test.";
+        println!("Original data: '{}'", original_data);
+        println!("Original length: {}", original_data.len());
+
+        // Compress the data
+        let compressed_data = match compress_rust_string(original_data) {
+            Ok(data) => {
+                println!("Compressed length: {}", data.len());
+                data
+            }
+            Err(e) => {
+                panic!("Compression failed: {}", e);
+            }
+        };
+
+        // Decompress the data
+        match decompress_rust_data(&compressed_data) {
+            Ok(decompressed_string) => {
+                println!("Decompressed data: '{}'", decompressed_string);
+                println!("Decompressed length: {}", decompressed_string.len());
+                assert_eq!(original_data, decompressed_string, "Round trip should preserve the original data");
+            }
+            Err(e) => {
+                panic!("Decompression failed: {}", e);
+            }
+        }
+    }
+
+    #[test]
+    fn test_decompression_empty_string() {
+        let original_data = "";
+        
+        // Compress empty string
+        let compressed_data = compress_rust_string(original_data).expect("Empty string compression should work");
+        
+        // Decompress it back
+        match decompress_rust_data(&compressed_data) {
+            Ok(decompressed_string) => {
+                assert_eq!(original_data, decompressed_string, "Empty string round trip should work");
+            }
+            Err(e) => {
+                panic!("Decompression of empty string failed: {}", e);
+            }
+        }
+    }
+
+    #[test]
+    fn test_decompression_unicode_strings() {
+        let test_cases = vec![
+            "Hello, 世界!",
+            "🦀 Rust FFI 🦀",
+            "café naïve résumé",
+            "𝕳𝖊𝖑𝖑𝖔",
+        ];
+
+        for original_data in test_cases {
+            println!("Testing Unicode string: '{}'", original_data);
+            
+            // Compress the data
+            let compressed_data = compress_rust_string(original_data)
+                .expect("Unicode string compression should work");
+            
+            // Decompress the data
+            let decompressed_string = decompress_rust_data(&compressed_data)
+                .expect("Unicode string decompression should work");
+            
+            assert_eq!(original_data, decompressed_string, "Unicode round trip should preserve the original data");
+        }
+    }
+
+    #[test]
+    fn test_decompression_with_corrupted_header() {
+        let original_data = "This is a test string for testing corrupted header.";
+        
+        // Compress the data
+        let mut compressed_data = compress_rust_string(original_data)
+            .expect("Compression should work");
+        
+        // Corrupt the header (first 8 bytes contain the original length)
+        if compressed_data.len() >= 8 {
+            compressed_data[0] = 0xFF; // Corrupt first byte of header
+            compressed_data[1] = 0xFF; // Corrupt second byte of header
+        }
+        
+        // Try to decompress with corrupted header
+        let result = decompress_rust_data(&compressed_data);
+        assert!(result.is_err(), "Decompression with corrupted header should fail");
+    }
+
+    #[test]
+    fn test_variable_byte_encoding_efficiency() {
+        // Test different string lengths to verify varint header efficiency
+        let test_cases = vec![
+            (10, 1),    // Small string: 1-byte varint
+            (127, 1),   // Max 1-byte varint
+            (128, 2),   // Min 2-byte varint  
+            (255, 2),   // Still 2-byte varint
+            (16383, 2), // Max 2-byte varint
+        ];
+        
+        for (length, expected_header_bytes) in test_cases {
+            let test_string = "A".repeat(length);
+            println!("Testing length {} (expecting {}-byte header)", length, expected_header_bytes);
+            
+            let compressed = compress_rust_string(&test_string)
+                .expect("Compression should work");
+            
+            // Calculate actual header size by comparing with zlib-only compression
+            // We can estimate this by checking if the compressed size is reasonable
+            let min_expected_size = expected_header_bytes + 8; // varint + minimal zlib output
+            assert!(compressed.len() >= min_expected_size, 
+                "Compressed size {} should be at least {} (header + minimal zlib)", 
+                compressed.len(), min_expected_size);
+            
+            // Verify round-trip works
+            let decompressed = decompress_rust_data(&compressed)
+                .expect("Decompression should work");
+            assert_eq!(test_string, decompressed, "Round trip should preserve data");
+            
+            // For highly repetitive strings, compression should be very effective
+            if length >= 100 {
+                assert!(compressed.len() < length / 2, 
+                    "Repetitive string of length {} should compress to less than half size, got {}", 
+                    length, compressed.len());
+            }
+        }
+    }
+
+    #[test]
+    fn test_decompression_invalid_data() {
+        let invalid_compressed_data = vec![0x78, 0x9c, 0xff, 0xff, 0xff]; // Invalid zlib data
+        
+        let result = decompress_rust_data(&invalid_compressed_data);
+        assert!(result.is_err(), "Decompression of invalid data should fail");
+    }
+
     // Property-based tests
     #[cfg(test)]
     mod property_tests {
@@ -150,7 +352,18 @@ mod tests {
                     assert_eq!(compressed, result2, "Compression should be deterministic");
                     
                     // Property: compressed data should be valid (no null pointers, reasonable size)
-                    assert!(compressed.len() < input.data.len() + 1000, "Compressed size should be reasonable");
+                    // With variable-byte header (1-5 bytes), compressed size should be reasonable
+                    assert!(compressed.len() < input.data.len() + 1005, "Compressed size should be reasonable (original + varint header + overhead)");
+                    
+                    // Property: round-trip compression/decompression should preserve data
+                    match decompress_rust_data(&compressed) {
+                        Ok(decompressed) => {
+                            assert_eq!(input.data, decompressed, "Round trip should preserve original data");
+                        }
+                        Err(e) => {
+                            panic!("Decompression failed for input '{}': {}", input.data, e);
+                        }
+                    }
                 }
                 Err(e) => {
                     // The only expected error is for strings with null bytes

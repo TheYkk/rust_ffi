@@ -1,14 +1,39 @@
 # Rust FFI Compression Library
 
-A Rust library that provides string compression functionality through a C FFI interface using zlib. This project demonstrates how to safely wrap C libraries in Rust while providing comprehensive testing, benchmarking, and fuzzing capabilities.
+A Rust library that provides string compression and decompression functionality through a C FFI interface using zlib. This project demonstrates how to safely wrap C libraries in Rust while providing comprehensive testing, benchmarking, and fuzzing capabilities.
 
 ## Features
 
-- **Safe FFI Wrapper**: Rust wrapper around a C compression library using zlib
-- **CLI Binary**: Command-line tool for compressing text/files
+- **Safe FFI Wrapper**: Rust wrapper around a C compression/decompression library using zlib
+- **Auto-sizing Decompression**: Compressed data includes original size header - no need to specify length manually
+- **CLI Binary**: Command-line tool for compressing and decompressing text/files
 - **Comprehensive Benchmarks**: Performance testing with various input sizes and patterns
 - **Fuzzing Support**: Property-based and fuzz testing for robustness
 - **Property-based Testing**: Structured testing with the `arbitrary` crate
+
+## Compressed Data Format
+
+The library uses an enhanced compression format with space-efficient Variable-Byte Encoding:
+
+```
+[varint original length header][zlib compressed data]
+```
+
+**Variable-Byte Encoding (Varint) Details:**
+- **1 byte** for lengths 0-127 (most common case)
+- **2 bytes** for lengths 128-16,383
+- **3 bytes** for lengths 16,384-2,097,151  
+- **4 bytes** for lengths 2,097,152-268,435,455
+- **5 bytes** for lengths 268,435,456+
+
+**Benefits:**
+- **Space-efficient**: Uses only 1-2 bytes for typical string lengths instead of fixed 8 bytes
+- **User-friendly**: No need to manually specify original length during decompression
+- **Self-contained**: Compressed files contain all necessary information
+- **Error prevention**: Eliminates mistakes from incorrect length parameters
+- **Industry standard**: Varint encoding used in Protocol Buffers, SQLite, and other formats
+
+**Note**: This format is not backward compatible with data compressed using earlier versions.
 
 ## Dependencies
 
@@ -45,17 +70,27 @@ cargo build --release
 ### Library
 
 ```rust
-use rust_ffi_example::compress_rust_string;
+use rust_ffi_example::{compress_rust_string, decompress_rust_data};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let original = "Hello, world! This string will be compressed.";
+    let original = "Hello, world! This string will be compressed and decompressed.";
     
+    // Compress the string
     match compress_rust_string(original) {
         Ok(compressed) => {
             println!("Original size: {} bytes", original.len());
             println!("Compressed size: {} bytes", compressed.len());
             println!("Compression ratio: {:.2}%", 
                 (compressed.len() as f64 / original.len() as f64) * 100.0);
+            
+            // Decompress the data back to string
+            match decompress_rust_data(&compressed) {
+                Ok(decompressed) => {
+                    println!("Decompressed: '{}'", decompressed);
+                    assert_eq!(original, decompressed, "Round trip should preserve data");
+                }
+                Err(e) => eprintln!("Decompression failed: {}", e),
+            }
         }
         Err(e) => eprintln!("Compression failed: {}", e),
     }
@@ -74,25 +109,27 @@ cargo build --release
 
 **Compress a string directly:**
 ```bash
-./target/release/compression_cli "Hello, world! This is a test string."
+./target/release/compression_cli compress "Hello, world! This is a test string."
 ```
 
 **Compress from stdin:**
 ```bash
-echo "Hello from stdin" | ./target/release/compression_cli
+echo "Hello from stdin" | ./target/release/compression_cli compress
 ```
 
 **Compress a file:**
 ```bash
-cat some_file.txt | ./target/release/compression_cli
+cat some_file.txt | ./target/release/compression_cli compress
+```
+
+**Decompress a compressed file:**
+```bash
+./target/release/compression_cli decompress compressed_output.bin
 ```
 
 The CLI will output:
-- Original data and length
-- Compressed data length
-- Compression ratio
-- Hex preview of compressed data
-- Save compressed data to `compressed_output.bin`
+- For compression: Original data and length, compressed data length, compression ratio, hex preview of compressed data (showing varint header), and save compressed data to `compressed_output.bin`
+- For decompression: Compressed data length, decompressed data, and save decompressed data to `decompressed_output.txt` (original size is automatically detected from varint header)
 
 ## Testing
 
@@ -147,7 +184,12 @@ This project includes comprehensive fuzzing support using `cargo-fuzz`.
 
 ### Setup Fuzzing
 
-First, install cargo-fuzz (if not already installed):
+Fuzzing requires the nightly Rust toolchain. First, install it:
+```bash
+rustup install nightly
+```
+
+Then install cargo-fuzz (if not already installed):
 ```bash
 cargo install cargo-fuzz
 ```
@@ -156,17 +198,17 @@ cargo install cargo-fuzz
 
 **Basic fuzzing (runs indefinitely until stopped with Ctrl+C):**
 ```bash
-cargo fuzz run fuzz_compression
+cargo +nightly fuzz run fuzz_compression
 ```
 
 **Fuzzing with timeout:**
 ```bash
-cargo fuzz run fuzz_compression -- -max_total_time=60
+cargo +nightly fuzz run fuzz_compression -- -max_total_time=60
 ```
 
 **Fuzzing with specific options:**
 ```bash
-cargo fuzz run fuzz_compression -- -max_len=10000 -jobs=4
+cargo +nightly fuzz run fuzz_compression -- -max_len=10000 -jobs=4
 ```
 
 ### Fuzzing Features
