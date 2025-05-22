@@ -19,5 +19,5 @@ Cargo.lock
 
 # End of https://www.toptal.com/developers/gitignore/api/rust
 
-*.tar.gz
+*.gz
 *.bin
