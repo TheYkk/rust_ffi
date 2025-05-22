@@ -5,9 +5,24 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[[bin]]
+name = "compression_cli"
+path = "src/bin/main.rs"
+
 [dependencies]
 libc = "0.2"
+
+[dev-dependencies]
+criterion = { version = "0.6.0", features = ["html_reports"] }
+arbitrary = { version = "1.4.1", features = ["derive"] }
 
 [build-dependencies]
 cc = "1.0"
 pkg-config = "0.3"
+
+[[bench]]
+name = "compression_bench"
+harness = false
+
+[package.metadata.cargo-fuzz]
+targets = ["fuzz_compression"]

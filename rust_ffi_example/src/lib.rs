@@ -74,7 +74,7 @@ mod tests {
 
     #[test]
     fn test_compression_basic() {
-        let original_data = "This is a test string for zlib compression, hopefully it gets smaller.";
+        let original_data = "This is a test string for zlib compression, hopefully it gets smaller. then smal file";
         println!("Original data: '{}'", original_data);
         println!("Original length: {}", original_data.len());
 
@@ -123,5 +123,108 @@ mod tests {
         let original_data = "hello\0world";
         // We expect compress_rust_string to return an Err here.
         assert!(compress_rust_string(original_data).is_err(), "Should fail for string with internal null byte due to CString conversion.");
+    }
+
+    // Property-based tests
+    #[cfg(test)]
+    mod property_tests {
+        use super::*;
+        use arbitrary::Arbitrary;
+
+        #[derive(Debug, Clone, Arbitrary)]
+        struct TestInput {
+            data: String,
+        }
+
+        // Helper function to run property tests
+        fn test_compression_properties(input: TestInput) {
+            let result = compress_rust_string(&input.data);
+            
+            match result {
+                Ok(compressed) => {
+                    // Property: compressed data should not be empty (zlib always produces some output)
+                    assert!(!compressed.is_empty(), "Compressed data should not be empty");
+                    
+                    // Property: compression should be deterministic
+                    let result2 = compress_rust_string(&input.data).unwrap();
+                    assert_eq!(compressed, result2, "Compression should be deterministic");
+                    
+                    // Property: compressed data should be valid (no null pointers, reasonable size)
+                    assert!(compressed.len() < input.data.len() + 1000, "Compressed size should be reasonable");
+                }
+                Err(e) => {
+                    // The only expected error is for strings with null bytes
+                    assert!(input.data.contains('\0'), "Error should only occur for strings with null bytes, got: {}", e);
+                }
+            }
+        }
+
+        #[test]
+        fn test_property_small_strings() {
+            let test_cases = vec![
+                TestInput { data: "".to_string() },
+                TestInput { data: "a".to_string() },
+                TestInput { data: "hello".to_string() },
+                TestInput { data: "The quick brown fox".to_string() },
+            ];
+            
+            for test_case in test_cases {
+                test_compression_properties(test_case);
+            }
+        }
+
+        #[test]
+        fn test_property_repetitive_strings() {
+            let test_cases = vec![
+                TestInput { data: "a".repeat(100) },
+                TestInput { data: "ab".repeat(50) },
+                TestInput { data: "hello world ".repeat(10) },
+            ];
+            
+            for test_case in test_cases {
+                test_compression_properties(test_case);
+            }
+        }
+
+        #[test]
+        fn test_property_unicode_strings() {
+            let test_cases = vec![
+                TestInput { data: "Hello, 世界!".to_string() },
+                TestInput { data: "🦀 Rust FFI 🦀".to_string() },
+                TestInput { data: "café naïve résumé".to_string() },
+                TestInput { data: "𝕳𝖊𝖑𝖑𝖔".to_string() },
+            ];
+            
+            for test_case in test_cases {
+                test_compression_properties(test_case);
+            }
+        }
+
+        #[test]
+        fn test_property_special_characters() {
+            let test_cases = vec![
+                TestInput { data: "\n\r\t".to_string() },
+                TestInput { data: "!@#$%^&*()".to_string() },
+                TestInput { data: "\"'\\`".to_string() },
+            ];
+            
+            for test_case in test_cases {
+                test_compression_properties(test_case);
+            }
+        }
+
+        #[test]
+        fn test_property_null_byte_handling() {
+            // These should all fail gracefully
+            let test_cases = vec![
+                TestInput { data: "hello\0world".to_string() },
+                TestInput { data: "\0".to_string() },
+                TestInput { data: "start\0middle\0end".to_string() },
+            ];
+            
+            for test_case in test_cases {
+                test_compression_properties(test_case);
+            }
+        }
     }
 }
