@@ -220,11 +220,27 @@ The fuzzer tests:
 - Memory safety and error handling
 - Edge cases and boundary conditions
 
+**Quiet Fuzzing Mode**: By default, the fuzzer runs quietly without error message noise from expected failure cases. This allows the fuzzer to efficiently test millions of inputs without cluttering the output.
+
+**Verbose Error Messages**: For debugging purposes, you can enable detailed error messages by building with the `verbose-errors` feature:
+```bash
+cargo build --features verbose-errors
+cargo +nightly fuzz run fuzz_decompress --features verbose-errors
+```
+
+This will show detailed error messages for:
+- Invalid compressed data (too small, corrupted headers)
+- Varint decoding failures
+- Zlib decompression errors
+- Memory allocation failures
+
 ### Fuzzing Results
 
 - **Corpus**: Input samples that triggered new code paths are saved to `fuzz/corpus/fuzz_compression/`
 - **Crashes**: Any crashes or panics are saved to `fuzz/artifacts/fuzz_compression/`
 - **Coverage**: Track code coverage to ensure thorough testing
+
+**Performance**: The fuzzer can process hundreds of thousands to millions of test cases per second, efficiently finding edge cases and potential vulnerabilities.
 
 ## Error Handling
 

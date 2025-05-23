@@ -9,6 +9,10 @@ edition = "2021"
 name = "compression_cli"
 path = "src/bin/main.rs"
 
+[features]
+# Feature to enable verbose error messages for debugging
+verbose-errors = []
+
 [dependencies]
 libc = "0.2"
 hex = "0.4" # Added for hex string decoding

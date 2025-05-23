@@ -95,6 +95,15 @@ pub fn compress_rust_string(s: &str) -> Result<Vec<u8>, &'static str> {
 /// This function wraps unsafe FFI calls. It handles memory management
 /// for the data returned by the C function and validates UTF-8.
 pub fn decompress_rust_data(compressed_data: &[u8]) -> Result<String, &'static str> {
+    // Early validation for obviously invalid input to reduce noise during fuzzing
+    if compressed_data.is_empty() {
+        return Err("Empty input data");
+    }
+    
+    if compressed_data.len() == 1 {
+        return Err("Input too small for valid compressed data");
+    }
+
     // Call the C function
     // This is an unsafe block because we are calling C code and dealing with raw pointers.
     let decompressed_c_data = unsafe {
@@ -106,7 +115,7 @@ pub fn decompress_rust_data(compressed_data: &[u8]) -> Result<String, &'static s
 
     // Check if the C function returned a valid buffer
     if decompressed_c_data.buffer.is_null() {
-        return Err("Decompression failed in C library (null buffer returned)");
+        return Err("Decompression failed");
     }
 
     // Convert the C data (raw pointer and length) to a Rust Vec<u8>

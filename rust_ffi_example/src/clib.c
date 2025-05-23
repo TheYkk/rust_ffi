@@ -46,12 +46,18 @@ int decode_varint(const char *buffer, int max_bytes, unsigned long *value) {
         
         shift += 7;
         if (shift >= 64) {
+            // Reduce noise during fuzzing - only print in debug mode
+            #ifdef DEBUG_FUZZING
             fprintf(stderr, "Varint overflow: length too large\n");
+            #endif
             return -1; // Overflow
         }
     }
     
+    // Reduce noise during fuzzing - only print in debug mode
+    #ifdef DEBUG_FUZZING
     fprintf(stderr, "Incomplete varint: unexpected end of data\n");
+    #endif
     return -1; // Incomplete varint
 }
 
@@ -96,7 +102,10 @@ DecompressedData decompress_data(const char *input, unsigned long input_len) {
     
     // Check minimum input size (at least 1 byte for varint + some compressed data)
     if (input_len < 2) {
+        // Reduce noise during fuzzing - only print in debug mode
+        #ifdef DEBUG_FUZZING
         fprintf(stderr, "Invalid compressed data: too small (need at least 2 bytes)\n");
+        #endif
         return result;
     }
     
@@ -104,19 +113,27 @@ DecompressedData decompress_data(const char *input, unsigned long input_len) {
     unsigned long original_len;
     int header_size = decode_varint(input, input_len, &original_len);
     if (header_size < 0) {
+        // Reduce noise during fuzzing - only print in debug mode
+        #ifdef DEBUG_FUZZING
         fprintf(stderr, "Invalid compressed data: failed to decode varint header\n");
+        #endif
         return result;
     }
     
     // Check that we have enough data after the header
     if ((unsigned long)header_size >= input_len) {
+        // Reduce noise during fuzzing - only print in debug mode
+        #ifdef DEBUG_FUZZING
         fprintf(stderr, "Invalid compressed data: no data after varint header\n");
+        #endif
         return result;
     }
     
     // Sanity check on original length (prevent absurdly large allocations)
     if (original_len > 100 * 1024 * 1024) { // 100MB limit
+        #ifdef DEBUG_FUZZING
         fprintf(stderr, "Invalid compressed data: original length too large (%lu bytes)\n", original_len);
+        #endif
         return result;
     }
     
@@ -133,15 +150,20 @@ DecompressedData decompress_data(const char *input, unsigned long input_len) {
                         (const Bytef *)(input + header_size), input_len - header_size);
 
     if (res != Z_OK) {
+        // Reduce noise during fuzzing - only print in debug mode
+        #ifdef DEBUG_FUZZING
         fprintf(stderr, "Decompression failed: %d\n", res);
+        #endif
         free(output_buffer);
         return result;
     }
     
     // Verify that decompressed length matches expected length
     if (actual_output_len != original_len) {
+        #ifdef DEBUG_FUZZING
         fprintf(stderr, "Decompression length mismatch: expected %lu, got %lu\n", 
                 original_len, actual_output_len);
+        #endif
         free(output_buffer);
         return result;
     }
