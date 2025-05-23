@@ -19,6 +19,16 @@ FROM gcr.io/oss-fuzz-base/base-builder-rust:v1
 # Install zlib1g-dev for the zlib.h header file.
 RUN apt-get update && apt-get install -y zlib1g-dev
 
+# Install rustup and set nightly as default.
+# The base-builder-rust image might have a specific version of Rust.
+# We install rustup to manage toolchains and switch to nightly.
+ENV RUSTUP_HOME=/usr/local/rustup     CARGO_HOME=/usr/local/cargo     PATH=/usr/local/cargo/bin:$PATH
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain none -y
+RUN rustup install nightly &&     rustup default nightly &&     # Install components that might be needed by fuzzing or specific crates
+    rustup component add rust-src llvm-tools-preview &&     # Ensure cargo-fuzz is installed for the nightly toolchain
+    cargo install cargo-fuzz
+
 # Copy the project's source code.
 COPY . $SRC/
 # Copy the build script.
