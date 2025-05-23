@@ -45,6 +45,10 @@ cargo clean
 # The SANITIZER environment variable is set by ClusterFuzzLite.
 # cargo fuzz build only supports one sanitizer at a time.
 # Disable LTO for release profile to avoid linking issues with sanitizers.
+if [ "$SANITIZER" = "address" ]; then
+  export CARGO_PROFILE_RELEASE_LTO=false
+fi
+
 for target in $FUZZ_TARGETS
 do
   echo "Building fuzz target: $target with sanitizer: $SANITIZER using nightly Rust and LTO disabled"

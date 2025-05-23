@@ -5,7 +5,6 @@ set -ex
 cd `git rev-parse --show-toplevel`
 cd fuzz/
 
-cargo install cargo-fuzz
 
 for target in $(cargo fuzz list)
 do
