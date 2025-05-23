@@ -26,13 +26,10 @@ RUN rustup toolchain install nightly &&     rustup default nightly &&     # Ensu
     cargo +nightly install cargo-fuzz &&     # Install components that might be needed by fuzzing or specific crates
     rustup component add rust-src --toolchain nightly &&     rustup component add llvm-tools-preview --toolchain nightly
 
-
 # Copy the project's source code.
 # Assuming the context of the Docker build is the root of the repository.
 COPY . $SRC/
 # Copy the build script.
 COPY ./.clusterfuzzlite/build.sh $SRC/
 # Workdir for build script.
-# The build.sh script cd's into $SRC/rust_ffi_example, 
-# so WORKDIR should be $SRC to allow build.sh to find rust_ffi_example.
 WORKDIR $SRC/rust_ffi_example

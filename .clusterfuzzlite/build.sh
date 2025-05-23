@@ -29,11 +29,12 @@ unset RUSTFLAGS
 # Build all fuzz targets for each sanitizer using the nightly toolchain.
 # The SANITIZER environment variable is set by ClusterFuzzLite.
 # cargo fuzz build only supports one sanitizer at a time.
+# Disable LTO for release profile to avoid linking issues with sanitizers.
 for target in $FUZZ_TARGETS
 do
-  echo "Building fuzz target: $target with sanitizer: $SANITIZER using nightly Rust"
+  echo "Building fuzz target: $target with sanitizer: $SANITIZER using nightly Rust and LTO disabled"
   # Ensure context for cargo fuzz build is the 'fuzz' directory where its Cargo.toml is located.
-  (cd fuzz && cargo +nightly fuzz build -O \
+  (cd fuzz && CARGO_PROFILE_RELEASE_LTO=false cargo +nightly fuzz build -O \
       -s $SANITIZER \
       $target)
 done
