@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y zlib1g-dev
 # The base-builder-rust image should have rustup pre-installed.
 RUN rustup toolchain install nightly &&     rustup default nightly &&\
     # Ensure cargo-fuzz is installed for the nightly toolchain
-    cargo +nightly install cargo-fuzz &&\
+    cargo +nightly install --git https://github.com/rust-fuzz/cargo-fuzz.git --branch main&&\
     # Install components that might be needed by fuzzing or specific crates
     rustup component add rust-src --toolchain nightly &&\
     rustup component add llvm-tools-preview --toolchain nightly &&\
