@@ -2,7 +2,6 @@
 use libfuzzer_sys::fuzz_target;
 use rust_ffi_example::{compress_string, free_compressed_data};
 use std::os::raw::{c_char, c_ulong};
-use std::ptr;
 
 fuzz_target!(|data: &[u8]| {
     // Create a C-compatible string: append a null byte.

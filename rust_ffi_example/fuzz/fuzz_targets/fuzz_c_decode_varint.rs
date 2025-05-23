@@ -1,7 +1,7 @@
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 use rust_ffi_example::decode_varint; // C FFI function
-use std::os::raw::c_ulong;
+use std::os::raw::{c_ulong, c_char};
 
 fuzz_target!(|data: &[u8]| {
     if data.is_empty() {
@@ -19,8 +19,8 @@ fuzz_target!(|data: &[u8]| {
         // Call the C FFI function
         // int decode_varint(const uint8_t *data, int max_bytes, uint64_t *value_out);
         let _bytes_read = decode_varint(
-            data.as_ptr(),              // data
-            data.len() as i32,          // max_bytes (as per C function signature)
+            data.as_ptr() as *const c_char, // data - cast to match c_char type
+            data.len() as i32,              // max_bytes (as per C function signature)
             &mut decoded_value as *mut c_ulong // value_out
         );
         // The result (bytes_read) and decoded_value can be optionally checked or used.
