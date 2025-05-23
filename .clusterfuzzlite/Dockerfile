@@ -21,10 +21,13 @@ RUN apt-get update && apt-get install -y zlib1g-dev
 
 # Install nightly toolchain and set it as default.
 # The base-builder-rust image should have rustup pre-installed.
-RUN rustup toolchain install nightly &&     rustup default nightly &&     # Ensure cargo-fuzz is installed for the nightly toolchain
-    # It might already be there, but this ensures it's available for nightly.
-    cargo +nightly install cargo-fuzz &&     # Install components that might be needed by fuzzing or specific crates
-    rustup component add rust-src --toolchain nightly &&     rustup component add llvm-tools-preview --toolchain nightly
+RUN rustup toolchain install nightly &&     rustup default nightly &&\
+    # Ensure cargo-fuzz is installed for the nightly toolchain
+    cargo +nightly install cargo-fuzz &&\
+    # Install components that might be needed by fuzzing or specific crates
+    rustup component add rust-src --toolchain nightly &&\
+    rustup component add llvm-tools-preview --toolchain nightly &&\
+    rustup component add clippy --toolchain nightly
 
 # Copy the project's source code.
 # Assuming the context of the Docker build is the root of the repository.
