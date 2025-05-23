@@ -37,6 +37,8 @@ rustc +nightly --version
 rustup +nightly --version
 rustup +nightly show
 cargo +nightly fuzz --version
+clang --version
+ld --version
 
 cargo clean
 # Build all fuzz targets for each sanitizer using the nightly toolchain.
@@ -47,7 +49,7 @@ for target in $FUZZ_TARGETS
 do
   echo "Building fuzz target: $target with sanitizer: $SANITIZER using nightly Rust and LTO disabled"
   # Ensure context for cargo fuzz build is the 'fuzz' directory where its Cargo.toml is located.
-  (cd fuzz && CARGO_PROFILE_RELEASE_LTO=false cargo +nightly fuzz build -O \
+  (cd fuzz && cargo +nightly fuzz build -O \
       -s $SANITIZER \
       $target)
 done
