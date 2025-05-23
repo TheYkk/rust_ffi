@@ -19,13 +19,13 @@
 # Find all fuzz targets in the fuzz/fuzz_targets directory by reading the Cargo.toml file.
 FUZZ_TARGETS=$(cd fuzz && cargo read-manifest | jq -r '.targets[] | select(.kind[] | contains("bin")) | select(.name | startswith("fuzz_")) | .name')
 
-# Build all fuzz targets.
-# The `cargo fuzz build` command does not support building multiple targets when specifying sanitizers.
-# So we need to loop through the fuzz targets and build them one by one.
+# Build all fuzz targets for each sanitizer.
+# The SANITIZER environment variable is set by ClusterFuzzLite.
+# cargo fuzz build only supports one sanitizer at a time.
 for target in $FUZZ_TARGETS
 do
   cargo fuzz build -O \
-      -s address,undefined \
+      -s $SANITIZER \
       $target
 done
 

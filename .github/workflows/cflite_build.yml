@@ -15,7 +15,7 @@ jobs:
      matrix:
         sanitizer:
         - address
-        - undefined
+        - undefined # Add other sanitizers like 'memory' if needed, each as a separate item.
    steps:
    - name: Build Fuzzers (${{ matrix.sanitizer }})
      id: build
