@@ -37,6 +37,8 @@ rustc +nightly --version
 rustup +nightly --version
 rustup +nightly show
 cargo +nightly fuzz --version
+
+cargo clean
 # Build all fuzz targets for each sanitizer using the nightly toolchain.
 # The SANITIZER environment variable is set by ClusterFuzzLite.
 # cargo fuzz build only supports one sanitizer at a time.
