@@ -16,6 +16,9 @@
 
 FROM gcr.io/oss-fuzz-base/base-builder-rust:v1
 
+# Install zlib1g-dev for the zlib.h header file.
+RUN apt-get update && apt-get install -y zlib1g-dev
+
 # Copy the project's source code.
 COPY . $SRC/
 # Copy the build script.

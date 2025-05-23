@@ -15,7 +15,8 @@ jobs:
       matrix:
         sanitizer:
         - address
-        - undefined # Add other sanitizers like 'memory' if needed, each as a separate item.
+        - leak
+        - memory
     steps:
     - name: Build Fuzzers (${{ matrix.sanitizer }})
       id: build
