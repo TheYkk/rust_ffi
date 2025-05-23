@@ -11,9 +11,10 @@ path = "src/bin/main.rs"
 
 [dependencies]
 libc = "0.2"
+hex = "0.4" # Added for hex string decoding
 
 [dev-dependencies]
-criterion = { version = "0.6.0", features = ["html_reports"] }
+criterion = { version = "0.5.1", features = ["html_reports"] } # Downgraded for Rust 1.75 compatibility
 arbitrary = { version = "1.4.1", features = ["derive"] }
 
 [build-dependencies]

@@ -1,4 +1,4 @@
-use rust_ffi_example::{compress_rust_string, decompress_rust_data};
+use rust_ffi_example::{compress_rust_string, decompress_rust_data, encode_varint_rust, decode_varint_rust};
 use std::env;
 use std::fs;
 use std::io::{self, Read};
@@ -7,11 +7,15 @@ fn print_usage(program_name: &str) {
     println!("Usage:");
     println!("  {} compress [text]              - Compress text (or from stdin)", program_name);
     println!("  {} decompress <file>            - Decompress binary file", program_name);
+    println!("  {} encode-varint <number>         - Encode a u64 number into varint format (output as hex)", program_name);
+    println!("  {} decode-varint <hex_bytes>      - Decode varint hex bytes into a u64 number", program_name);
     println!("  echo 'text' | {} compress       - Compress from stdin", program_name);
     println!("");
     println!("Examples:");
     println!("  {} compress \"Hello, world!\"", program_name);
     println!("  {} decompress compressed_output.bin", program_name);
+    println!("  {} encode-varint 12345", program_name);
+    println!("  {} decode-varint c96101", program_name);
     println!("  echo \"Hello from stdin\" | {} compress", program_name);
 }
 
@@ -112,8 +116,66 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
+        "encode-varint" => {
+            if args.len() < 3 {
+                eprintln!("Error: encode-varint requires a number.");
+                print_usage(&args[0]);
+                std::process::exit(1);
+            }
+            let number_str = &args[2];
+            match number_str.parse::<u64>() {
+                Ok(number) => {
+                    match encode_varint_rust(number) {
+                        Ok(encoded_bytes) => {
+                            let hex_string: String = encoded_bytes
+                                .iter()
+                                .map(|&b| format!("{:02x}", b))
+                                .collect();
+                            println!("{}", hex_string);
+                        }
+                        Err(e) => {
+                            eprintln!("Error encoding varint: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                Err(_) => {
+                    eprintln!("Error: Invalid number format '{}'. Please provide a valid u64 number.", number_str);
+                    print_usage(&args[0]);
+                    std::process::exit(1);
+                }
+            }
+        }
+        "decode-varint" => {
+            if args.len() < 3 {
+                eprintln!("Error: decode-varint requires hex bytes.");
+                print_usage(&args[0]);
+                std::process::exit(1);
+            }
+            let hex_str = &args[2];
+            match hex::decode(hex_str) {
+                Ok(bytes) => {
+                    match decode_varint_rust(&bytes) {
+                        Ok((decoded_number, bytes_read)) => {
+                            println!("Decoded number: {}", decoded_number);
+                            println!("Bytes read: {}", bytes_read);
+                        }
+                        Err(e) => {
+                            eprintln!("Error decoding varint: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                Err(_) => {
+                    eprintln!("Error: Invalid hex string '{}'.", hex_str);
+                    print_usage(&args[0]);
+                    std::process::exit(1);
+                }
+            }
+        }
+        // This is the new position for the default arm
         _ => {
-            eprintln!("Error: Unknown operation '{}'. Use 'compress' or 'decompress'.", operation);
+            eprintln!("Error: Unknown operation '{}'. Use 'compress', 'decompress', 'encode-varint', or 'decode-varint'.", operation);
             print_usage(&args[0]);
             std::process::exit(1);
         }

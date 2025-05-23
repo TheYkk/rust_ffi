@@ -48,6 +48,41 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "fuzz_c_compress"
+path = "fuzz_targets/fuzz_c_compress.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_c_decompress"
+path = "fuzz_targets/fuzz_c_decompress.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_c_encode_varint"
+path = "fuzz_targets/fuzz_c_encode_varint.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_c_decode_varint"
+path = "fuzz_targets/fuzz_c_decode_varint.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_decompress"
+path = "fuzz_targets/fuzz_decompress.rs"
+test = false
+doc = false
+bench = false
+
 [profile.dev]
 opt-level = 0
 debug = true
