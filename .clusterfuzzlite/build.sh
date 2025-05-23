@@ -15,28 +15,32 @@
 #
 ################################################################################
 
-# Note: This script is running in $SRC/rust_ffi_example
+# This script is executed from $SRC/rust_ffi_example (due to WORKDIR in Dockerfile)
+
 # Find all fuzz targets in the fuzz/fuzz_targets directory by reading the Cargo.toml file.
-FUZZ_TARGETS=$(cd fuzz && cargo read-manifest | jq -r '.targets[] | select(.kind[] | contains("bin")) | select(.name | startswith("fuzz_")) | .name')
+# The 'cd fuzz' is relative to the WORKDIR $SRC/rust_ffi_example
+FUZZ_TARGETS=$(cd fuzz && cargo +nightly read-manifest | jq -r '.targets[] | select(.kind[] | contains("bin")) | select(.name | startswith("fuzz_")) | .name')
 
 # Unset RUSTFLAGS before calling cargo fuzz build.
 # cargo-fuzz sets its own RUSTFLAGS, and conflicting flags from the environment
 # (e.g., from the ClusterFuzzLite base image) can cause issues.
 unset RUSTFLAGS
 
-# Build all fuzz targets for each sanitizer.
+# Build all fuzz targets for each sanitizer using the nightly toolchain.
 # The SANITIZER environment variable is set by ClusterFuzzLite.
 # cargo fuzz build only supports one sanitizer at a time.
 for target in $FUZZ_TARGETS
 do
-  echo "Building fuzz target: $target with sanitizer: $SANITIZER"
-  cargo fuzz build -O \
+  echo "Building fuzz target: $target with sanitizer: $SANITIZER using nightly Rust"
+  # Ensure context for cargo fuzz build is the 'fuzz' directory where its Cargo.toml is located.
+  (cd fuzz && cargo +nightly fuzz build -O \
       -s $SANITIZER \
-      $target
+      $target)
 done
 
 # Copy the fuzzer executables to $OUT.
+# The executables are created in $SRC/rust_ffi_example/fuzz/target/x86_64-unknown-linux-gnu/release/
 for target in $FUZZ_TARGETS
 do
-  cp fuzz/target/x86_64-unknown-linux-gnu/release/$target $OUT/$target
+  cp "fuzz/target/x86_64-unknown-linux-gnu/release/$target" "$OUT/$target"
 done

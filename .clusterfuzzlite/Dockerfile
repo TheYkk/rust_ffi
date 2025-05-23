@@ -19,19 +19,20 @@ FROM gcr.io/oss-fuzz-base/base-builder-rust:v1
 # Install zlib1g-dev for the zlib.h header file.
 RUN apt-get update && apt-get install -y zlib1g-dev
 
-# Install rustup and set nightly as default.
-# The base-builder-rust image might have a specific version of Rust.
-# We install rustup to manage toolchains and switch to nightly.
-ENV RUSTUP_HOME=/usr/local/rustup     CARGO_HOME=/usr/local/cargo     PATH=/usr/local/cargo/bin:$PATH
+# Install nightly toolchain and set it as default.
+# The base-builder-rust image should have rustup pre-installed.
+RUN rustup toolchain install nightly &&     rustup default nightly &&     # Ensure cargo-fuzz is installed for the nightly toolchain
+    # It might already be there, but this ensures it's available for nightly.
+    cargo +nightly install cargo-fuzz &&     # Install components that might be needed by fuzzing or specific crates
+    rustup component add rust-src --toolchain nightly &&     rustup component add llvm-tools-preview --toolchain nightly
 
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain none -y
-RUN rustup install nightly &&     rustup default nightly &&     # Install components that might be needed by fuzzing or specific crates
-    rustup component add rust-src llvm-tools-preview &&     # Ensure cargo-fuzz is installed for the nightly toolchain
-    cargo install cargo-fuzz
 
 # Copy the project's source code.
+# Assuming the context of the Docker build is the root of the repository.
 COPY . $SRC/
 # Copy the build script.
 COPY ./.clusterfuzzlite/build.sh $SRC/
 # Workdir for build script.
+# The build.sh script cd's into $SRC/rust_ffi_example, 
+# so WORKDIR should be $SRC to allow build.sh to find rust_ffi_example.
 WORKDIR $SRC/rust_ffi_example
