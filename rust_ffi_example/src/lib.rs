@@ -26,6 +26,10 @@ extern "C" {
     // LZ4 functions
     pub fn compress_string_lz4(input: *const c_char, input_len: c_ulong) -> CompressedData;
     pub fn decompress_data_lz4(input: *const c_char, input_len: c_ulong) -> DecompressedData;
+
+    // ZSTD functions
+    pub fn compress_string_zstd(input: *const c_char, input_len: c_ulong) -> CompressedData;
+    pub fn decompress_data_zstd(input: *const c_char, input_len: c_ulong) -> DecompressedData;
     
     // Variable-byte encoding functions
     pub fn encode_varint(value: c_ulong, buffer: *mut c_char) -> i32;
@@ -144,6 +148,201 @@ pub fn decompress_rust_data(compressed_data: &[u8]) -> Result<String, &'static s
     match String::from_utf8(rust_vec) {
         Ok(s) => Ok(s),
         Err(_) => Err("Decompressed data is not valid UTF-8"),
+    }
+}
+
+
+#[cfg(test)]
+mod zstd_tests {
+    use super::*;
+
+    #[test]
+    fn test_zstd_compression_basic() {
+        let original_data = "This is a test string for ZSTD compression, hopefully it gets smaller. ZSTD is known for good compression ratios.";
+        println!("ZSTD Original data: '{}'", original_data);
+        println!("ZSTD Original length: {}", original_data.len());
+
+        match compress_rust_string_zstd(original_data) {
+            Ok(compressed_data) => {
+                println!("ZSTD Compressed length: {}", compressed_data.len());
+                assert!(compressed_data.len() > 1, "ZSTD Compressed data should contain header + compressed content.");
+                
+                if original_data.len() > 20 { // Heuristic for expecting compression
+                    // Adding 10 for varint header to be conservative
+                    assert!(compressed_data.len() < original_data.len() + 10, "ZSTD Compressed data + header should be smaller than original for reasonably sized input.");
+                }
+            }
+            Err(e) => {
+                panic!("test_zstd_compression_basic failed: {}", e);
+            }
+        }
+    }
+
+    #[test]
+    fn test_zstd_compression_empty_string() {
+        let original_data = "";
+        println!("ZSTD Original data: '{}'", original_data);
+        println!("ZSTD Original length: {}", original_data.len());
+
+        match compress_rust_string_zstd(original_data) {
+            Ok(compressed_data) => {
+                println!("ZSTD Compressed length for empty string: {}", compressed_data.len());
+                // Compressing an empty string with ZSTD (plus our header) results in a small output.
+                // 1 byte for varint(0) + ZSTD's minimum for empty.
+                assert!(compressed_data.len() > 0, "ZSTD Compressed empty string should not be empty.");
+                assert!(compressed_data.len() < 15, "ZSTD Compressed empty string should be small."); // ZSTD header for empty is ~12 bytes + 1 for varint
+
+                // Test round trip for empty string
+                match decompress_rust_data_zstd(&compressed_data) {
+                    Ok(decompressed_string) => {
+                        assert_eq!(original_data, decompressed_string, "ZSTD Empty string round trip should work");
+                    }
+                    Err(e) => {
+                        panic!("ZSTD Decompression of empty string failed: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                panic!("test_zstd_compression_empty_string failed: {}", e);
+            }
+        }
+    }
+    
+    #[test]
+    fn test_zstd_string_with_null_byte_internal() {
+        let original_data = "hello\0world_zstd";
+        assert!(compress_rust_string_zstd(original_data).is_err(), "ZSTD: Should fail for string with internal null byte due to CString conversion.");
+    }
+
+    #[test]
+    fn test_zstd_compression_decompression_round_trip() {
+        let original_data = "This is a test string for ZSTD compression and decompression round trip test. It needs to be reasonably long for ZSTD to show its benefits. ZSTD is great!";
+        println!("ZSTD Original data: '{}'", original_data);
+        println!("ZSTD Original length: {}", original_data.len());
+
+        let compressed_data = match compress_rust_string_zstd(original_data) {
+            Ok(data) => {
+                println!("ZSTD Compressed length: {}", data.len());
+                data
+            }
+            Err(e) => {
+                panic!("ZSTD Compression failed: {}", e);
+            }
+        };
+
+        match decompress_rust_data_zstd(&compressed_data) {
+            Ok(decompressed_string) => {
+                println!("ZSTD Decompressed data: '{}'", decompressed_string);
+                println!("ZSTD Decompressed length: {}", decompressed_string.len());
+                assert_eq!(original_data, decompressed_string, "ZSTD Round trip should preserve the original data");
+            }
+            Err(e) => {
+                panic!("ZSTD Decompression failed: {}", e);
+            }
+        }
+    }
+
+    #[test]
+    fn test_zstd_decompression_unicode_strings() {
+        let test_cases = vec![
+            "Hello, 世界! (ZSTD)",
+            "🦀 Rust FFI 🦀 (ZSTD)",
+            "café naïve résumé (ZSTD)",
+            "𝕳𝖊𝖑𝖑𝖔 (ZSTD)",
+            "Алло, мир! (ZSTD)", // Cyrillic
+        ];
+
+        for original_data in test_cases {
+            println!("Testing ZSTD Unicode string: '{}'", original_data);
+            
+            let compressed_data = compress_rust_string_zstd(original_data)
+                .unwrap_or_else(|e| panic!("ZSTD Unicode string compression failed for '{}': {}", original_data, e));
+            
+            let decompressed_string = decompress_rust_data_zstd(&compressed_data)
+                .unwrap_or_else(|e| panic!("ZSTD Unicode string decompression failed for '{}': {}", original_data, e));
+            
+            assert_eq!(original_data, decompressed_string, "ZSTD Unicode round trip should preserve the original data for '{}'", original_data);
+        }
+    }
+
+    #[test]
+    fn test_zstd_decompression_with_corrupted_header() {
+        let original_data = "This is a test string for testing corrupted ZSTD header.";
+        
+        let mut compressed_data = compress_rust_string_zstd(original_data)
+            .expect("ZSTD Compression should work");
+        
+        if !compressed_data.is_empty() {
+            compressed_data[0] = 0xFF; 
+            if compressed_data.len() > 1 {
+                 compressed_data[1] = 0xFF;
+            }
+        } else {
+            panic!("ZSTD compressed data was empty, cannot corrupt header.");
+        }
+        
+        let result = decompress_rust_data_zstd(&compressed_data);
+        assert!(result.is_err(), "ZSTD Decompression with corrupted varint header should fail. Got: {:?}", result);
+    }
+
+    #[test]
+    fn test_zstd_decompression_invalid_data_too_short() {
+        let original_len: u64 = 20; // Some length
+        let header = encode_varint_rust(original_len).unwrap();
+        
+        let mut invalid_data_body = header.clone();
+        invalid_data_body.push(0x28); // ZSTD magic number start, but incomplete frame
+        let result_body = decompress_rust_data_zstd(&invalid_data_body);
+        assert!(result_body.is_err(), "ZSTD Decompression with too short data body should fail. Got: {:?}", result_body);
+
+        let result_header_only = decompress_rust_data_zstd(&header);
+        assert!(result_header_only.is_err(), "ZSTD Decompression with only header and no data should fail. Got: {:?}", result_header_only);
+
+        let random_bytes = vec![0x12, 0x34, 0x56, 0x78]; 
+        let result_random = decompress_rust_data_zstd(&random_bytes);
+        assert!(result_random.is_err(), "ZSTD Decompression of random garbage bytes should fail. Got: {:?}", result_random);
+
+        let too_short_for_header = vec![];
+        let result_too_short_header = decompress_rust_data_zstd(&too_short_for_header);
+        assert!(result_too_short_header.is_err(), "ZSTD Decompression of empty byte slice should fail. Got: {:?}", result_too_short_header);
+        
+        let single_byte = vec![0x01];
+        let result_single_byte = decompress_rust_data_zstd(&single_byte);
+        assert!(result_single_byte.is_err(), "ZSTD Decompression of single byte should fail. Got: {:?}", result_single_byte);
+    }
+
+     #[test]
+    fn test_zstd_highly_compressible_data() {
+        let original_data = "b".repeat(10000); 
+        
+        let compressed_data = compress_rust_string_zstd(&original_data)
+            .expect("ZSTD compression of repetitive data should work");
+        
+        println!("ZSTD Highly compressible: Original size: {}, Compressed size: {}", original_data.len(), compressed_data.len());
+        assert!(compressed_data.len() < original_data.len() / 50 + 10, "ZSTD should compress repetitive data significantly."); // ZSTD is very good
+
+        let decompressed_string = decompress_rust_data_zstd(&compressed_data)
+            .expect("ZSTD decompression of repetitive data should work");
+        
+        assert_eq!(original_data, decompressed_string, "ZSTD Round trip for repetitive data should preserve the original data");
+    }
+
+    #[test]
+    fn test_zstd_random_like_data() {
+        let original_data = "ThisIsARandomLikeStringForZstdTestingWithoutMuchRepetition.ItIncludesNumbers12345AndSymbols!@#$.";
+        
+        let compressed_data = compress_rust_string_zstd(original_data)
+            .expect("ZSTD compression of less compressible data should work");
+
+        println!("ZSTD Less compressible: Original size: {}, Compressed size: {}", original_data.len(), compressed_data.len());
+        if original_data.len() > 50 { 
+            assert!(compressed_data.len() < original_data.len() + 10, "ZSTD should not expand data significantly for moderate strings.");
+        }
+
+        let decompressed_string = decompress_rust_data_zstd(&compressed_data)
+            .expect("ZSTD decompression of less compressible data should work");
+        
+        assert_eq!(original_data, decompressed_string, "ZSTD Round trip for less compressible data should preserve the original data");
     }
 }
 
@@ -934,6 +1133,100 @@ mod lz4_tests {
         assert_eq!(original_data, decompressed_string, "LZ4 Round trip for less compressible data should preserve the original data");
     }
 }
+
+/// Compresses a string using the C library's `compress_string_zstd` function.
+///
+/// # Arguments
+/// * `s`: The string slice to compress.
+///
+/// # Returns
+/// * `Ok(Vec<u8>)` containing the compressed data if successful.
+/// * `Err(&str)` with an error message if compression fails or input is invalid.
+///
+/// # Safety
+/// This function wraps unsafe FFI calls. It handles C string conversion
+/// and memory management for the data returned by the C function.
+pub fn compress_rust_string_zstd(s: &str) -> Result<Vec<u8>, &'static str> {
+    let c_input_string = match CString::new(s) {
+        Ok(cs) => cs,
+        Err(_) => return Err("Failed to create CString, input might contain null bytes"),
+    };
+
+    let input_ptr = c_input_string.as_ptr();
+    let input_len = s.len() as c_ulong;
+
+    let compressed_c_data = unsafe { compress_string_zstd(input_ptr, input_len) };
+
+    if compressed_c_data.buffer.is_null() {
+        return Err("ZSTD Compression failed in C library (null buffer returned)");
+    }
+
+    let rust_vec: Vec<u8> = unsafe {
+        let slice = slice::from_raw_parts(compressed_c_data.buffer as *const u8, compressed_c_data.length as usize);
+        slice.to_vec()
+    };
+
+    unsafe {
+        free_compressed_data(compressed_c_data); // Reuse the existing free function
+    }
+
+    Ok(rust_vec)
+}
+
+/// Decompresses data using the C library's `decompress_data_zstd` function.
+/// The original size is automatically read from the compressed data header.
+///
+/// # Arguments
+/// * `compressed_data`: The compressed data as a byte slice (including the size header).
+///
+/// # Returns
+/// * `Ok(String)` containing the decompressed string if successful.
+/// * `Err(&str)` with an error message if decompression fails or output is invalid UTF-8.
+///
+/// # Safety
+/// This function wraps unsafe FFI calls. It handles memory management
+/// for the data returned by the C function and validates UTF-8.
+pub fn decompress_rust_data_zstd(compressed_data: &[u8]) -> Result<String, &'static str> {
+    if compressed_data.is_empty() {
+        return Err("Empty input data for ZSTD decompression");
+    }
+    
+    // ZSTD decompression needs at least a header and some data.
+    // Smallest valid ZSTD stream is typically a few bytes.
+    // A single byte varint for original_len=0 plus ZSTD overhead.
+    if compressed_data.len() < 2 { // Minimum: 1 byte varint + 1 byte data (highly unlikely for ZSTD)
+        return Err("Input too small for valid ZSTD compressed data");
+    }
+
+    let decompressed_c_data = unsafe {
+        decompress_data_zstd(
+            compressed_data.as_ptr() as *const c_char,
+            compressed_data.len() as c_ulong,
+        )
+    };
+
+    if decompressed_c_data.buffer.is_null() {
+        return Err("ZSTD Decompression failed in C library (null buffer returned)");
+    }
+
+    let rust_vec: Vec<u8> = unsafe {
+        let slice = slice::from_raw_parts(
+            decompressed_c_data.buffer as *const u8,
+            decompressed_c_data.length as usize,
+        );
+        slice.to_vec()
+    };
+
+    unsafe {
+        free_decompressed_data(decompressed_c_data); // Reuse the existing free function
+    }
+
+    match String::from_utf8(rust_vec) {
+        Ok(s) => Ok(s),
+        Err(_) => Err("ZSTD Decompressed data is not valid UTF-8"),
+    }
+}
+
 
 #[cfg(test)]
 mod reproduce_fuzzing_bug {

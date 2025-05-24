@@ -97,6 +97,27 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "fuzz_c_compress_zstd"
+path = "fuzz_targets/fuzz_c_compress_zstd.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_c_decompress_zstd"
+path = "fuzz_targets/fuzz_c_decompress_zstd.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_zstd_rust_roundtrip"
+path = "fuzz_targets/fuzz_zstd_rust_roundtrip.rs"
+test = false
+doc = false
+bench = false
+
 [profile.dev]
 opt-level = 0
 debug = true
