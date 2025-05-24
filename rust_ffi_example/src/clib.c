@@ -67,8 +67,8 @@ int decode_varint(const char *buffer, int max_bytes, unsigned long *value) {
 // The caller is responsible for freeing the returned buffer
 CompressedData compress_string(const char *input, unsigned long input_len) {
     unsigned long compressed_bound = compressBound(input_len);
-    // Allocate buffer for: max 5-byte varint header + compressed data
-    unsigned long total_buffer_size = 5 + compressed_bound;
+    // Allocate buffer for: max 10-byte varint header + compressed data
+    unsigned long total_buffer_size = 10 + compressed_bound;
     char *output_buffer = (char *)malloc(total_buffer_size);
     CompressedData result = {NULL, 0};
 
@@ -187,8 +187,8 @@ CompressedData compress_string_lz4(const char *input, unsigned long input_len) {
         return (CompressedData){NULL, 0};
     }
 
-    // Allocate buffer for: max 5-byte varint header + compressed data
-    unsigned long total_buffer_size = 5 + (unsigned long)lz4_max_compressed_size;
+    // Allocate buffer for: max 10-byte varint header + compressed data
+    unsigned long total_buffer_size = 10 + (unsigned long)lz4_max_compressed_size;
     char *output_buffer = (char *)malloc(total_buffer_size);
     CompressedData result = {NULL, 0};
 

@@ -721,8 +721,8 @@ mod lz4_tests {
                 
                 // For non-trivial strings, LZ4 should compress.
                 if original_data.len() > 20 {
-                     // Adding 5 for varint header to be conservative
-                    assert!(compressed_data.len() < original_data.len() + 5, "LZ4 Compressed data + header should be smaller than original for reasonably sized input.");
+                     // Adding 10 for varint header to be conservative
+                    assert!(compressed_data.len() < original_data.len() + 10, "LZ4 Compressed data + header should be smaller than original for reasonably sized input.");
                 }
             }
             Err(e) => {
@@ -901,9 +901,9 @@ mod lz4_tests {
             .expect("LZ4 compression of repetitive data should work");
         
         println!("LZ4 Highly compressible: Original size: {}, Compressed size: {}", original_data.len(), compressed_data.len());
-        // header (max 5 bytes for 10000) + LZ4 compressed data.
+        // header (max 10 bytes for 10000) + LZ4 compressed data.
         // LZ4 should achieve very high compression for this.
-        assert!(compressed_data.len() < original_data.len() / 10 + 5, "LZ4 should compress repetitive data significantly.");
+        assert!(compressed_data.len() < original_data.len() / 10 + 10, "LZ4 should compress repetitive data significantly.");
 
         let decompressed_string = decompress_rust_data_lz4(&compressed_data)
             .expect("LZ4 decompression of repetitive data should work");
@@ -924,8 +924,8 @@ mod lz4_tests {
         // For less compressible data, the gain might be smaller or even negative if string is short,
         // due to header and LZ4 minimums.
         if original_data.len() > 50 { // Arbitrary threshold for expecting some compression
-             // Adding 5 for varint header
-            assert!(compressed_data.len() < original_data.len() + 5, "LZ4 should not expand data significantly for moderate strings.");
+             // Adding 10 for varint header
+            assert!(compressed_data.len() < original_data.len() + 10, "LZ4 should not expand data significantly for moderate strings.");
         }
 
         let decompressed_string = decompress_rust_data_lz4(&compressed_data)
