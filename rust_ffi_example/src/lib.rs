@@ -22,6 +22,10 @@ extern "C" {
     pub fn free_compressed_data(data: CompressedData);
     pub fn decompress_data(input: *const c_char, input_len: c_ulong) -> DecompressedData;
     pub fn free_decompressed_data(data: DecompressedData);
+
+    // LZ4 functions
+    pub fn compress_string_lz4(input: *const c_char, input_len: c_ulong) -> CompressedData;
+    pub fn decompress_data_lz4(input: *const c_char, input_len: c_ulong) -> DecompressedData;
     
     // Variable-byte encoding functions
     pub fn encode_varint(value: c_ulong, buffer: *mut c_char) -> i32;
@@ -206,6 +210,106 @@ pub fn decode_varint_rust(data: &[u8]) -> Result<(u64, usize), &'static str> {
     
     Ok((value as u64, bytes_read as usize))
 }
+
+/// Compresses a string using the C library's `compress_string_lz4` function.
+///
+/// # Arguments
+/// * `s`: The string slice to compress.
+///
+/// # Returns
+/// * `Ok(Vec<u8>)` containing the compressed data if successful.
+/// * `Err(&str)` with an error message if compression fails or input is invalid.
+///
+/// # Safety
+/// This function wraps unsafe FFI calls. It handles C string conversion
+/// and memory management for the data returned by the C function.
+pub fn compress_rust_string_lz4(s: &str) -> Result<Vec<u8>, &'static str> {
+    // Convert the Rust string to a C-compatible string (null-terminated)
+    // LZ4 itself doesn't require null termination for the input buffer length,
+    // but CString is a convenient way to manage the *const c_char lifetime.
+    // We will pass s.len() as the length.
+    let c_input_string = match CString::new(s) {
+        Ok(cs) => cs,
+        Err(_) => return Err("Failed to create CString, input might contain null bytes"),
+    };
+
+    let input_ptr = c_input_string.as_ptr();
+    // Length of the string (original length, not including CString's null terminator)
+    let input_len = s.len() as c_ulong;
+
+    // Call the C function
+    let compressed_c_data = unsafe { compress_string_lz4(input_ptr, input_len) };
+
+    if compressed_c_data.buffer.is_null() {
+        return Err("LZ4 Compression failed in C library (null buffer returned)");
+    }
+
+    let rust_vec: Vec<u8> = unsafe {
+        let slice = slice::from_raw_parts(compressed_c_data.buffer as *const u8, compressed_c_data.length as usize);
+        slice.to_vec()
+    };
+
+    unsafe {
+        free_compressed_data(compressed_c_data); // Reuse the existing free function
+    }
+
+    Ok(rust_vec)
+}
+
+/// Decompresses data using the C library's `decompress_data_lz4` function.
+/// The original size is automatically read from the compressed data header.
+///
+/// # Arguments
+/// * `compressed_data`: The compressed data as a byte slice (including the size header).
+///
+/// # Returns
+/// * `Ok(String)` containing the decompressed string if successful.
+/// * `Err(&str)` with an error message if decompression fails or output is invalid UTF-8.
+///
+/// # Safety
+/// This function wraps unsafe FFI calls. It handles memory management
+/// for the data returned by the C function and validates UTF-8.
+pub fn decompress_rust_data_lz4(compressed_data: &[u8]) -> Result<String, &'static str> {
+    if compressed_data.is_empty() {
+        return Err("Empty input data for LZ4 decompression");
+    }
+    
+    // LZ4 decompression needs at least a header and some data.
+    // A single byte varint for original_len=0 plus LZ4 overhead.
+    // Smallest valid LZ4 stream is typically a few bytes.
+    if compressed_data.len() < 2 { // Minimum: 1 byte varint + 1 byte data (highly unlikely for LZ4)
+        return Err("Input too small for valid LZ4 compressed data");
+    }
+
+    let decompressed_c_data = unsafe {
+        decompress_data_lz4(
+            compressed_data.as_ptr() as *const c_char,
+            compressed_data.len() as c_ulong,
+        )
+    };
+
+    if decompressed_c_data.buffer.is_null() {
+        return Err("LZ4 Decompression failed in C library (null buffer returned)");
+    }
+
+    let rust_vec: Vec<u8> = unsafe {
+        let slice = slice::from_raw_parts(
+            decompressed_c_data.buffer as *const u8,
+            decompressed_c_data.length as usize,
+        );
+        slice.to_vec()
+    };
+
+    unsafe {
+        free_decompressed_data(decompressed_c_data); // Reuse the existing free function
+    }
+
+    match String::from_utf8(rust_vec) {
+        Ok(s) => Ok(s),
+        Err(_) => Err("LZ4 Decompressed data is not valid UTF-8"),
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -595,5 +699,238 @@ mod tests {
                 test_compression_properties(test_case);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod lz4_tests {
+    use super::*;
+
+    #[test]
+    fn test_lz4_compression_basic() {
+        let original_data = "This is a test string for LZ4 compression, hopefully it gets smaller.";
+        println!("LZ4 Original data: '{}'", original_data);
+        println!("LZ4 Original length: {}", original_data.len());
+
+        match compress_rust_string_lz4(original_data) {
+            Ok(compressed_data) => {
+                println!("LZ4 Compressed length: {}", compressed_data.len());
+                // LZ4 is generally very effective.
+                // The compressed data includes a variable-byte header (1-5 bytes) with the original length.
+                assert!(compressed_data.len() > 1, "LZ4 Compressed data should contain header + compressed content.");
+                
+                // For non-trivial strings, LZ4 should compress.
+                if original_data.len() > 20 {
+                     // Adding 5 for varint header to be conservative
+                    assert!(compressed_data.len() < original_data.len() + 5, "LZ4 Compressed data + header should be smaller than original for reasonably sized input.");
+                }
+            }
+            Err(e) => {
+                panic!("test_lz4_compression_basic failed: {}", e);
+            }
+        }
+    }
+
+    #[test]
+    fn test_lz4_compression_empty_string() {
+        let original_data = "";
+        println!("LZ4 Original data: '{}'", original_data);
+        println!("LZ4 Original length: {}", original_data.len());
+
+        match compress_rust_string_lz4(original_data) {
+            Ok(compressed_data) => {
+                println!("LZ4 Compressed length for empty string: {}", compressed_data.len());
+                // Compressing an empty string with LZ4 (plus our header) results in a small output.
+                // 1 byte for varint(0) + LZ4's minimum for empty (might be 1 byte or more depending on specifics)
+                assert!(compressed_data.len() > 0, "LZ4 Compressed empty string should not be empty.");
+                assert!(compressed_data.len() < 10, "LZ4 Compressed empty string should be small.");
+
+
+                // Test round trip for empty string
+                match decompress_rust_data_lz4(&compressed_data) {
+                    Ok(decompressed_string) => {
+                        assert_eq!(original_data, decompressed_string, "LZ4 Empty string round trip should work");
+                    }
+                    Err(e) => {
+                        panic!("LZ4 Decompression of empty string failed: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                panic!("test_lz4_compression_empty_string failed: {}", e);
+            }
+        }
+    }
+    
+    #[test]
+    fn test_lz4_string_with_null_byte_internal() {
+        // CString::new will fail for strings with interior null bytes.
+        let original_data = "hello\0world_lz4";
+        assert!(compress_rust_string_lz4(original_data).is_err(), "LZ4: Should fail for string with internal null byte due to CString conversion.");
+    }
+
+    #[test]
+    fn test_lz4_compression_decompression_round_trip() {
+        let original_data = "This is a test string for LZ4 compression and decompression round trip test. It needs to be reasonably long for LZ4 to show its benefits.";
+        println!("LZ4 Original data: '{}'", original_data);
+        println!("LZ4 Original length: {}", original_data.len());
+
+        let compressed_data = match compress_rust_string_lz4(original_data) {
+            Ok(data) => {
+                println!("LZ4 Compressed length: {}", data.len());
+                data
+            }
+            Err(e) => {
+                panic!("LZ4 Compression failed: {}", e);
+            }
+        };
+
+        match decompress_rust_data_lz4(&compressed_data) {
+            Ok(decompressed_string) => {
+                println!("LZ4 Decompressed data: '{}'", decompressed_string);
+                println!("LZ4 Decompressed length: {}", decompressed_string.len());
+                assert_eq!(original_data, decompressed_string, "LZ4 Round trip should preserve the original data");
+            }
+            Err(e) => {
+                panic!("LZ4 Decompression failed: {}", e);
+            }
+        }
+    }
+
+    #[test]
+    fn test_lz4_decompression_empty_string_round_trip() {
+        // This is also covered by test_lz4_compression_empty_string, but good to have a dedicated one.
+        let original_data = "";
+        
+        let compressed_data = compress_rust_string_lz4(original_data).expect("LZ4 Empty string compression should work");
+        
+        match decompress_rust_data_lz4(&compressed_data) {
+            Ok(decompressed_string) => {
+                assert_eq!(original_data, decompressed_string, "LZ4 Empty string round trip should work");
+            }
+            Err(e) => {
+                panic!("LZ4 Decompression of empty string failed: {}", e);
+            }
+        }
+    }
+
+    #[test]
+    fn test_lz4_decompression_unicode_strings() {
+        let test_cases = vec![
+            "Hello, 世界! (LZ4)",
+            "🦀 Rust FFI 🦀 (LZ4)",
+            "café naïve résumé (LZ4)",
+            "𝕳𝖊𝖑𝖑𝖔 (LZ4)",
+            "Алло, мир! (LZ4)", // Cyrillic
+        ];
+
+        for original_data in test_cases {
+            println!("Testing LZ4 Unicode string: '{}'", original_data);
+            
+            let compressed_data = compress_rust_string_lz4(original_data)
+                .unwrap_or_else(|e| panic!("LZ4 Unicode string compression failed for '{}': {}", original_data, e));
+            
+            let decompressed_string = decompress_rust_data_lz4(&compressed_data)
+                .unwrap_or_else(|e| panic!("LZ4 Unicode string decompression failed for '{}': {}", original_data, e));
+            
+            assert_eq!(original_data, decompressed_string, "LZ4 Unicode round trip should preserve the original data for '{}'", original_data);
+        }
+    }
+
+    #[test]
+    fn test_lz4_decompression_with_corrupted_header() {
+        let original_data = "This is a test string for testing corrupted LZ4 header.";
+        
+        let mut compressed_data = compress_rust_string_lz4(original_data)
+            .expect("LZ4 Compression should work");
+        
+        // Corrupt the varint header.
+        // Assuming header is small (e.g., 1-2 bytes for this string length).
+        if !compressed_data.is_empty() {
+            compressed_data[0] = 0xFF; // Try to make it an invalid varint or point to a huge length
+            if compressed_data.len() > 1 {
+                 compressed_data[1] = 0xFF;
+            }
+        } else {
+            // If somehow compressed_data is empty (it shouldn't be), this test is moot.
+            // But let's make it fail if that's the case, as it indicates an issue in compression.
+            panic!("LZ4 compressed data was empty, cannot corrupt header.");
+        }
+        
+        let result = decompress_rust_data_lz4(&compressed_data);
+        assert!(result.is_err(), "LZ4 Decompression with corrupted varint header should fail. Got: {:?}", result);
+    }
+
+    #[test]
+    fn test_lz4_decompression_invalid_data_too_short() {
+        // Data that's too short to be valid LZ4 (even after a valid header)
+        // 1. Encode a valid header for a small original length (e.g., 10 bytes)
+        let original_len: u64 = 10;
+        let header = encode_varint_rust(original_len).unwrap();
+        
+        // 2. Append insufficient or garbage LZ4 data
+        let mut invalid_data = header;
+        invalid_data.push(0x01); // Not enough data for LZ4_decompress_safe
+                                 // for an original length of 10
+
+        let result = decompress_rust_data_lz4(&invalid_data);
+        assert!(result.is_err(), "LZ4 Decompression with too short data body should fail. Got: {:?}", result);
+
+        // Test with completely empty data body after header
+        let header_only = encode_varint_rust(original_len).unwrap();
+        let result_header_only = decompress_rust_data_lz4(&header_only);
+         assert!(result_header_only.is_err(), "LZ4 Decompression with only header and no data should fail. Got: {:?}", result_header_only);
+
+
+        // Test with just a few random bytes that are unlikely to be valid
+        let random_bytes = vec![0x12, 0x34, 0x56]; // No valid header, just garbage
+        let result_random = decompress_rust_data_lz4(&random_bytes);
+        assert!(result_random.is_err(), "LZ4 Decompression of random garbage bytes should fail. Got: {:?}", result_random);
+
+        // Test with data that is too short to even contain a minimal header
+        let too_short_for_header = vec![];
+        let result_too_short_header = decompress_rust_data_lz4(&too_short_for_header);
+        assert!(result_too_short_header.is_err(), "LZ4 Decompression of empty byte slice should fail. Got: {:?}", result_too_short_header);
+    }
+
+     #[test]
+    fn test_lz4_highly_compressible_data() {
+        let original_data = "a".repeat(10000); // Highly compressible
+        
+        let compressed_data = compress_rust_string_lz4(&original_data)
+            .expect("LZ4 compression of repetitive data should work");
+        
+        println!("LZ4 Highly compressible: Original size: {}, Compressed size: {}", original_data.len(), compressed_data.len());
+        // header (max 5 bytes for 10000) + LZ4 compressed data.
+        // LZ4 should achieve very high compression for this.
+        assert!(compressed_data.len() < original_data.len() / 10 + 5, "LZ4 should compress repetitive data significantly.");
+
+        let decompressed_string = decompress_rust_data_lz4(&compressed_data)
+            .expect("LZ4 decompression of repetitive data should work");
+        
+        assert_eq!(original_data, decompressed_string, "LZ4 Round trip for repetitive data should preserve the original data");
+    }
+
+    #[test]
+    fn test_lz4_random_like_data() {
+        // More random-like, less compressible data
+        // (Still text, so somewhat compressible, but less than "aaaa...")
+        let original_data = "TheV0yage0fTheBeagleByCharlesDarwinChapterI.";
+        
+        let compressed_data = compress_rust_string_lz4(original_data)
+            .expect("LZ4 compression of less compressible data should work");
+
+        println!("LZ4 Less compressible: Original size: {}, Compressed size: {}", original_data.len(), compressed_data.len());
+        // For less compressible data, the gain might be smaller or even negative if string is short,
+        // due to header and LZ4 minimums.
+        if original_data.len() > 50 { // Arbitrary threshold for expecting some compression
+             // Adding 5 for varint header
+            assert!(compressed_data.len() < original_data.len() + 5, "LZ4 should not expand data significantly for moderate strings.");
+        }
+
+        let decompressed_string = decompress_rust_data_lz4(&compressed_data)
+            .expect("LZ4 decompression of less compressible data should work");
+        
+        assert_eq!(original_data, decompressed_string, "LZ4 Round trip for less compressible data should preserve the original data");
     }
 }
