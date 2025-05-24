@@ -42,12 +42,12 @@ The project also includes C functions for variable-byte encoding (`encode_varint
 ## Building and Dependencies
 
 The C code (`src/clib.c`) is compiled and linked by the `build.rs` script.
-- **`pkg-config`**: The build script uses `pkg-config` to locate `zlib` and `liblz4` (the LZ4 library) on the system.
-- **Fallback**: If `pkg-config` fails to find either library, the build script will attempt to link them directly (e.g., using `-lz` for zlib and `-llz4` for LZ4).
-- **Requirements**: For a successful build, especially if `pkg-config` is not configured or the libraries are in non-standard locations, you should have the development libraries for Zlib and LZ4 installed.
+- **`pkg-config`**: The build script uses `pkg-config` to locate `zlib` and `liblz4` (the LZ4 library) on the system. This is the preferred method for finding the necessary compilation and linking flags.
+- **Fallback**: If `pkg-config` fails to find either library (e.g., `pkg-config` is not installed, or the `.pc` files for the libraries are not in `pkg-config`'s search path), the build script will attempt to link them directly (e.g., using `-lz` for zlib and `-llz4` for LZ4).
+- **Requirements**: For a successful build and for all features (including compression, decompression, tests, benchmarks, and fuzzing) to work correctly, you should have the development libraries for Zlib and LZ4 installed. These packages provide the necessary header files (like `zlib.h` and `lz4.h`) and shared library objects.
     - On Debian/Ubuntu: `sudo apt-get install zlib1g-dev liblz4-dev`
     - On Fedora: `sudo dnf install zlib-devel lz4-devel`
-    - On macOS (using Homebrew): `brew install zlib lz4`
+    - On macOS (using Homebrew): `brew install lz4` (zlib is often pre-installed or available through Xcode Command Line Tools; if not, `brew install zlib` might be needed).
 
 ## Testing
 
