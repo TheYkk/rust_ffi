@@ -17,7 +17,7 @@
 FROM gcr.io/oss-fuzz-base/base-builder-rust:v1
 
 # Install zlib1g-dev for the zlib.h header file and liblz4-dev for lz4.h.
-RUN apt-get update && apt-get install -y zlib1g-dev liblz4-dev
+RUN apt-get update && apt-get install -y zlib1g-dev liblz4-dev libzstd-dev
 
 # Install nightly toolchain and set it as default.
 # The base-builder-rust image should have rustup pre-installed.
