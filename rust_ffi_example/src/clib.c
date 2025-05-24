@@ -139,7 +139,7 @@ DecompressedData decompress_data(const char *input, unsigned long input_len) {
     }
     
     // Allocate buffer for decompressed data
-    char *output_buffer = (char *)malloc(original_len + 1); // +1 for potential null terminator
+    char *output_buffer = (char *)calloc(original_len + 1, 1); // calloc zero-initializes memory
     if (output_buffer == NULL) {
         perror("Failed to allocate memory for decompression");
         return result;
@@ -258,7 +258,7 @@ DecompressedData decompress_data_lz4(const char *input, unsigned long input_len)
     }
     
     if (original_len == 0) { // Handle zero-length original string case
-        char *output_buffer = (char *)malloc(1); // Allocate 1 byte for empty string
+        char *output_buffer = (char *)calloc(1, 1); // calloc zero-initializes memory
         if (output_buffer == NULL) {
             perror("Failed to allocate memory for LZ4 decompression (empty string)");
             return result;
@@ -271,7 +271,7 @@ DecompressedData decompress_data_lz4(const char *input, unsigned long input_len)
 
 
     // Allocate buffer for decompressed data
-    char *output_buffer = (char *)malloc(original_len + 1); // +1 for potential null terminator
+    char *output_buffer = (char *)calloc(original_len + 1, 1); // calloc zero-initializes memory
     if (output_buffer == NULL) {
         perror("Failed to allocate memory for LZ4 decompression");
         return result;
