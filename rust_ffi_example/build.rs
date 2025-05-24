@@ -77,6 +77,15 @@ fn main() {
                 or ensure pkg-config can locate it.");
     }
 
+    // Find and configure zstd
+    if !find_and_add_library(&mut build, "libzstd", "zstd", "zstd.h") {
+        // Panic with instructions if zstd isn't found
+        panic!("zstd library or headers not found. \
+                Please install the zstd development package (e.g., 'libzstd-dev' on Debian/Ubuntu, \
+                'zstd-devel' on Fedora/CentOS, or 'zstd' via Homebrew/MacPorts) \
+                or ensure pkg-config can locate it.");
+    }
+
     // Ensure Cargo reruns this script if the C file changes
     println!("cargo:rerun-if-changed=src/clib.c");
 

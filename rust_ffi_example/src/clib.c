@@ -3,6 +3,7 @@
 #include <string.h>
 #include <zlib.h>
 #include <lz4.h>
+#include <zstd.h>
 
 // Define a struct to return both buffer and length
 typedef struct {
@@ -302,6 +303,147 @@ DecompressedData decompress_data_lz4(const char *input, unsigned long input_len)
 
     result.buffer = output_buffer;
     result.length = (unsigned long)decompressed_size;
+    return result;
+}
+
+// Function to compress a string using Zstandard (zstd) with variable-byte length header
+// The compressed data format: [varint original length][ZSTD compressed data]
+// The caller is responsible for freeing the returned buffer
+CompressedData compress_string_zstd(const char *input, unsigned long input_len) {
+    // Calculate the maximum compressed size using ZSTD_compressBound
+    size_t zstd_max_compressed_size = ZSTD_compressBound(input_len);
+    if (ZSTD_isError(zstd_max_compressed_size)) {
+        #ifdef DEBUG_FUZZING
+        fprintf(stderr, "ZSTD_compressBound failed: %s\n", ZSTD_getErrorName(zstd_max_compressed_size));
+        #endif
+        return (CompressedData){NULL, 0};
+    }
+
+    // Allocate buffer for: max 10-byte varint header + compressed data
+    unsigned long total_buffer_size = 10 + (unsigned long)zstd_max_compressed_size;
+    char *output_buffer = (char *)malloc(total_buffer_size);
+    CompressedData result = {NULL, 0};
+
+    if (output_buffer == NULL) {
+        perror("Failed to allocate memory for ZSTD compression");
+        return result; // Return empty result
+    }
+
+    // Encode original length as varint at the beginning
+    int header_size = encode_varint(input_len, output_buffer);
+
+    // Compress data after the varint header
+    size_t compressed_data_size = ZSTD_compress(
+        output_buffer + header_size, 
+        total_buffer_size - header_size,
+        input, 
+        input_len,
+        1 // Default compression level
+    );
+
+    if (ZSTD_isError(compressed_data_size)) {
+        #ifdef DEBUG_FUZZING
+        fprintf(stderr, "ZSTD_compress failed: %s\n", ZSTD_getErrorName(compressed_data_size));
+        #endif
+        free(output_buffer);
+        return result; // Return empty result
+    }
+
+    result.buffer = output_buffer;
+    result.length = header_size + compressed_data_size; // Header + compressed data
+    return result;
+}
+
+// Function to decompress data using Zstandard (zstd), automatically reading original size from varint header
+// Expects input format: [varint original length][ZSTD compressed data]
+// The caller is responsible for freeing the returned buffer
+DecompressedData decompress_data_zstd(const char *input, unsigned long input_len) {
+    DecompressedData result = {NULL, 0};
+
+    // Check minimum input size (at least 1 byte for varint + some compressed data)
+    if (input_len < 2) {
+        #ifdef DEBUG_FUZZING
+        fprintf(stderr, "Invalid ZSTD compressed data: too small (need at least 2 bytes)\n");
+        #endif
+        return result;
+    }
+
+    // Decode original length from varint header
+    unsigned long original_len;
+    int header_size = decode_varint(input, input_len, &original_len);
+    if (header_size < 0) {
+        #ifdef DEBUG_FUZZING
+        fprintf(stderr, "Invalid ZSTD compressed data: failed to decode varint header\n");
+        #endif
+        return result;
+    }
+
+    // Check that we have enough data after the header
+    if ((unsigned long)header_size >= input_len) {
+        #ifdef DEBUG_FUZZING
+        fprintf(stderr, "Invalid ZSTD compressed data: no data after varint header\n");
+        #endif
+        return result;
+    }
+
+    // Sanity check on original length (prevent absurdly large allocations)
+    // Using the same limit as zlib/lz4 versions for consistency
+    if (original_len > 100 * 1024 * 1024) { // 100MB limit
+        #ifdef DEBUG_FUZZING
+        fprintf(stderr, "Invalid ZSTD compressed data: original length too large (%lu bytes)\n", original_len);
+        #endif
+        return result;
+    }
+    
+    if (original_len == 0) { // Handle zero-length original string case
+        char *output_buffer = (char *)calloc(1, 1); 
+        if (output_buffer == NULL) {
+            perror("Failed to allocate memory for ZSTD decompression (empty string)");
+            return result;
+        }
+        output_buffer[0] = '\0';
+        result.buffer = output_buffer;
+        result.length = 0;
+        return result;
+    }
+
+    // Allocate buffer for decompressed data
+    char *output_buffer = (char *)calloc(original_len + 1, 1); 
+    if (output_buffer == NULL) {
+        perror("Failed to allocate memory for ZSTD decompression");
+        return result;
+    }
+
+    // Decompress data (skip the varint header)
+    size_t decompressed_size = ZSTD_decompress(
+        output_buffer, 
+        original_len,
+        input + header_size, 
+        input_len - header_size
+    );
+
+    if (ZSTD_isError(decompressed_size)) {
+        #ifdef DEBUG_FUZZING
+        fprintf(stderr, "ZSTD_decompress failed: %s\n", ZSTD_getErrorName(decompressed_size));
+        #endif
+        free(output_buffer);
+        return result;
+    }
+
+    // Verify that decompressed length matches expected length
+    if (decompressed_size != original_len) {
+        #ifdef DEBUG_FUZZING
+        fprintf(stderr, "ZSTD Decompression length mismatch: expected %lu, got %zu\n",
+                original_len, decompressed_size);
+        #endif
+        free(output_buffer);
+        return result;
+    }
+    
+    output_buffer[original_len] = '\0'; // Ensure null termination
+
+    result.buffer = output_buffer;
+    result.length = decompressed_size;
     return result;
 }
 
