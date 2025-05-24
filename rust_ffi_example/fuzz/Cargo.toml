@@ -83,6 +83,20 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "fuzz_c_compress_lz4"
+path = "fuzz_targets/fuzz_c_compress_lz4.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_c_decompress_lz4"
+path = "fuzz_targets/fuzz_c_decompress_lz4.rs"
+test = false
+doc = false
+bench = false
+
 [profile.dev]
 opt-level = 0
 debug = true
